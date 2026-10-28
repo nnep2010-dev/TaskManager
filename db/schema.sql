@@ -18,13 +18,13 @@ create table if not exists employees (
   created_at timestamptz not null default now()
 );
 
--- Dashboard logins. A head sees only their own department; the proprietor sees everything.
+-- Dashboard logins. The proprietor sees everything, a head only their own department, staff only their own tasks.
 create table if not exists users (
   id serial primary key,
   email text not null unique,
   password_hash text not null,
   display_name text not null,
-  access text not null check (access in ('proprietor', 'head')),
+  access text not null check (access in ('proprietor', 'head', 'staff')),
   employee_id int references employees(id),
   created_at timestamptz not null default now()
 );
