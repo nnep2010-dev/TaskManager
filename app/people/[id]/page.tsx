@@ -27,7 +27,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       {days.map((d) => (
         <div key={d.report_date} className="card" style={{ marginBottom: 12 }}>
           <div className="person-head" style={{ marginBottom: 8 }}>
-            <b>{formatDate(d.report_date)}</b>
+            <b>
+              {formatDate(d.report_date)}
+              {user.access === "proprietor" && <> · <Link className="edit-link" href={`/people/${person.id}/edit?date=${d.report_date}`}>Edit</Link></>}
+            </b>
             {d.submitted_at ? <span className="pill ok">Sent {formatTime(d.submitted_at)}</span> : <span className="pill missing-pill">Not reported</span>}
           </div>
           {d.tasks.length ? (
