@@ -13,8 +13,9 @@ const secret = () => {
 export type SessionUser = {
   id: number;
   display_name: string;
-  access: "proprietor" | "head";
-  department_id: number | null; // set for heads
+  access: "proprietor" | "head" | "staff";
+  employee_id: number | null;
+  department_id: number | null; // set for heads and staff
 };
 
 export async function createSession(userId: number) {
@@ -42,7 +43,7 @@ export async function currentUser(): Promise<SessionUser | null> {
   try {
     const { payload } = await jwtVerify(token, secret());
     return await one<SessionUser>(
-      `select u.id, u.display_name, u.access, e.department_id
+      `select u.id, u.display_name, u.access, u.employee_id, e.department_id
          from users u left join employees e on e.id = u.employee_id
         where u.id = $1`,
       [payload.uid],
@@ -59,5 +60,9 @@ export async function requireUser(): Promise<SessionUser> {
 }
 
 export function canSeeDepartment(user: SessionUser, departmentId: number) {
-  return user.access === "proprietor" || user.department_id === departmentId;
+  return user.access === "proprietor" || (user.access === "head" && user.department_id === departmentId);
+}
+
+export function canSeePerson(user: SessionUser, person: { id: number; department_id: number }) {
+  return canSeeDepartment(user, person.department_id) || user.employee_id === person.id;
 }
