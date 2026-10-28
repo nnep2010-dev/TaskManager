@@ -12,6 +12,7 @@ function csvCell(v: unknown) {
 export async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
+  if (user.access === "staff") return new Response("Forbidden", { status: 403 });
   const url = new URL(req.url);
   const d = url.searchParams.get("date");
   const date = isValidDate(d) ? d : today();
