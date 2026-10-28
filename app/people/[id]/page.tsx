@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StatusPill } from "@/components/DateBar";
-import { canSeeDepartment, requireUser } from "@/lib/auth";
+import { canSeePerson, requireUser } from "@/lib/auth";
 import { personHistory } from "@/lib/dashboard";
 import { formatDate, formatTime } from "@/lib/time";
 
@@ -12,14 +12,14 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
   const data = await personHistory(id, 30);
-  if (!data || !canSeeDepartment(user, data.person.department_id)) notFound();
+  if (!data || !canSeePerson(user, data.person)) notFound();
   const { person, days } = data;
 
   return (
     <>
       <div className="breadcrumb">
         {user.access === "proprietor" && <><Link href="/">All departments</Link> / </>}
-        <Link href={`/departments/${person.department_id}`}>{person.department}</Link> /
+        {user.access === "staff" ? person.department : <Link href={`/departments/${person.department_id}`}>{person.department}</Link>} /
       </div>
       <h1>{person.name}</h1>
       <p className="sub">{person.role}{person.manager ? ` · reports to ${person.manager}` : ""} · last 30 reports</p>
