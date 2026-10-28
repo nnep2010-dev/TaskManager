@@ -2,7 +2,8 @@
 -- The three real test numbers are Neha (Sales Manager), Arjun (Sales Executive 1) and Karthik (Service Engineer 1).
 
 insert into departments (name, sort_order) values
-  ('Admin', 1), ('Sales', 2), ('Production', 3), ('Service', 4), ('Development', 5)
+  ('Admin', 1), ('Sales', 2), ('Production', 3), ('Service', 4), ('Development', 5),
+  ('Accounts', 6), ('Purchase', 7), ('Dispatch', 8)
 on conflict (name) do nothing;
 
 insert into employees (name, phone, department_id, role, is_head) values
