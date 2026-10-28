@@ -1,4 +1,4 @@
-Aimport { one, pool, query } from "./db";
+import { one, pool, query } from "./db";
 import { today } from "./time";
 import { sendButtons, sendTemplate, sendText, windowOpen } from "./whatsapp";
 
