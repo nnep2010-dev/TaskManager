@@ -198,10 +198,11 @@ async function replyWithList(employee: Employee, intro?: string) {
     return;
   }
   const done = tasks.filter((t) => t.status === "done").length;
+  const example = (tasks.find((t) => t.status !== "done") ?? tasks[0]).seq;
   await sendText(
     employee.phone,
     employee.id,
-    `${intro ? intro + "\n\n" : ""}*Today's tasks* (${done}/${tasks.length} done)\n${formatList(tasks)}\n\nReply e.g. *2 done* to update, or *add* a new task.`,
+    `${intro ? intro + "\n\n" : ""}*Today's tasks* (${done}/${tasks.length} done)\n${formatList(tasks)}\n\nReply e.g. *${example} done* to update, or *add* a new task.`,
   );
 }
 
