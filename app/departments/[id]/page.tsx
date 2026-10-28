@@ -60,6 +60,7 @@ export default async function DepartmentPage({
               <div>
                 <h3><Link href={`/people/${p.id}`}>{p.name}</Link></h3>
                 <div className="role">{p.role}</div>
+                {user.access === "proprietor" && <Link className="edit-link" href={`/people/${p.id}/edit?date=${date}`}>Edit tasks</Link>}
               </div>
               {p.submitted_at ? (
                 <span className="pill ok" title="Time the day's tasks were sent">{formatTime(p.submitted_at)}</span>
