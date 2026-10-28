@@ -11,6 +11,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   const user = await requireUser();
   const sp = await searchParams;
   const date = isValidDate(sp.date) ? sp.date : today();
+  if (user.access === "staff") redirect(user.employee_id ? `/people/${user.employee_id}` : "/account");
   if (user.access === "head" && user.department_id) redirect(`/departments/${user.department_id}?date=${date}`);
 
   const depts = await departmentSummaries(date);
