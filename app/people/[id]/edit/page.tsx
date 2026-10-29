@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ensureReport, todaysTasks, type TaskStatus } from "@/lib/bot";
 import { currentUser, requireUser } from "@/lib/auth";
 import { one, query } from "@/lib/db";
+import { hasChanges, notifyTaskChanges, type TaskChanges } from "@/lib/notify";
 import { formatDate, isValidDate, today } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -22,14 +23,23 @@ async function saveTasks(formData: FormData) {
   const date = String(formData.get("date") ?? "");
   if (!Number.isInteger(employeeId) || !isValidDate(date)) redirect("/");
 
+  const before = new Map((await todaysTasks(employeeId, date)).map((t) => [t.id, t]));
+  const changes: TaskChanges = { added: [], edited: [], removed: [] };
+
   for (const id of formData.getAll("task_id").map(Number)) {
+    const old = before.get(id);
     if (formData.get(`delete_${id}`)) {
       await query("delete from tasks where id = $1 and employee_id = $2", [id, employeeId]);
+      if (old) changes.removed.push(old.description);
       continue;
     }
     const description = String(formData.get(`description_${id}`) ?? "").trim();
-    const status = String(formData.get(`status_${id}`) ?? "");
+    const status = String(formData.get(`status_${id}`) ?? "") as TaskStatus;
     if (!description || !STATUSES.some((s) => s.value === status)) continue;
+    if (old && old.description !== description) changes.edited.push(`${old.seq}. ${description}`);
+    else if (old && old.status !== status) {
+      changes.edited.push(`${old.seq}. ${description} – now ${STATUSES.find((s) => s.value === status)!.label}`);
+    }
     await query("update tasks set description = $3, status = $4 where id = $1 and employee_id = $2", [id, employeeId, description, status]);
   }
 
@@ -42,9 +52,20 @@ async function saveTasks(formData: FormData) {
          values ($1, $2, $3, (select coalesce(max(seq), 0) + 1 from tasks where employee_id = $2 and report_date = $3), $4)`,
         [report.id, employeeId, date, description],
       );
+      changes.added.push(description);
     }
   }
-  redirect(`/people/${employeeId}/edit?date=${date}&saved=1`);
+
+  let notified = false;
+  if (formData.get("notify") && hasChanges(changes)) {
+    try {
+      await notifyTaskChanges(employeeId, date, user.display_name, changes);
+      notified = true;
+    } catch (err) {
+      console.error("Task change notification failed", err);
+    }
+  }
+  redirect(`/people/${employeeId}/edit?date=${date}&saved=${notified ? "notified" : "1"}`);
 }
 
 export default async function EditTasksPage({
@@ -60,8 +81,8 @@ export default async function EditTasksPage({
   const sp = await searchParams;
   const date = isValidDate(sp.date) ? sp.date : today();
   if (!Number.isInteger(id)) notFound();
-  const person = await one<{ id: number; name: string; department_id: number; department: string }>(
-    "select e.id, e.name, e.department_id, d.name as department from employees e join departments d on d.id = e.department_id where e.id = $1",
+  const person = await one<{ id: number; name: string; phone: string | null; department_id: number; department: string }>(
+    "select e.id, e.name, e.phone, e.department_id, d.name as department from employees e join departments d on d.id = e.department_id where e.id = $1",
     [id],
   );
   if (!person) notFound();
@@ -76,7 +97,11 @@ export default async function EditTasksPage({
       </div>
       <h1>Edit tasks · {person.name}</h1>
       <p className="sub">{formatDate(date)} · task numbers stay the same so staff can keep using them on WhatsApp</p>
-      {sp.saved && <p style={{ color: "var(--good)" }}>Changes saved.</p>}
+      {sp.saved && (
+        <p style={{ color: "var(--good)" }}>
+          {sp.saved === "notified" ? `Changes saved and sent to ${person.name.split(" ")[0]} on WhatsApp.` : "Changes saved."}
+        </p>
+      )}
 
       <form action={saveTasks} className="card edit-tasks">
         <input type="hidden" name="employee_id" value={id} />
@@ -104,6 +129,12 @@ export default async function EditTasksPage({
         )}
         <label htmlFor="new_tasks"><b>Add tasks</b> <span className="sub">(one per line)</span></label>
         <textarea id="new_tasks" name="new_tasks" rows={3} placeholder="Call ABC Ltd about the quotation" />
+        {person.phone && (
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" name="notify" defaultChecked={date >= today()} />
+            Send {person.name.split(" ")[0]} a WhatsApp message about these changes
+          </label>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
           <button type="submit">Save changes</button>
           <Link className="btn secondary" href={`/departments/${person.department_id}?date=${date}`}>Back</Link>
