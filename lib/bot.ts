@@ -1,6 +1,7 @@
 import { one, pool, query } from "./db";
 import { today } from "./time";
 import { sendButtons, sendTemplate, sendText, windowOpen } from "./whatsapp";
+import * as voice from "./voice";
 
 export type Employee = {
   id: number;
@@ -46,6 +47,7 @@ const TEMPLATES = {
 const HELP = [
   "Here's how to update your tasks:",
   "• Send your tasks for today, one per line",
+  "• Or send a 🎤 voice message in Tamil or English",
   "• *add* Call ABC Ltd  – add a task",
   "• *2 done*  – mark task 2 done (also: *2 progress*, *2 not done*)",
   "• *all done*  – mark every task done",
@@ -206,15 +208,21 @@ async function replyWithList(employee: Employee, intro?: string) {
   );
 }
 
-export type Incoming = { phone: string; text?: string; buttonId?: string; waMessageId?: string };
+export type Incoming = {
+  phone: string;
+  text?: string;
+  buttonId?: string;
+  waMessageId?: string;
+  audio?: { mediaId: string; mimeType?: string };
+};
 
-/** Handles one message from WhatsApp (or the simulator). */
-export async function handleIncoming(msg: Incoming) {
-  const logged = await query(
+/** Handles one message from WhatsApp (or the simulator). Voice can be swapped out in tests. */
+export async function handleIncoming(msg: Incoming, voiceApi: Pick<typeof voice, "downloadMedia" | "interpretVoice"> = voice) {
+  const logged = await query<{ id: number }>(
     `insert into messages (phone, direction, kind, body, wa_message_id, employee_id)
      values ($1, 'in', $2, $3, $4, (select id from employees where phone = $1))
      on conflict (wa_message_id) do nothing returning id`,
-    [msg.phone, msg.buttonId ? "button" : "text", msg.text ?? msg.buttonId ?? "", msg.waMessageId ?? null],
+    [msg.phone, msg.buttonId ? "button" : msg.audio ? "voice" : "text", msg.text ?? msg.buttonId ?? (msg.audio ? "🎤 Voice message" : ""), msg.waMessageId ?? null],
   );
   if (!logged.length) return; // WhatsApp retried a message we already handled
 
@@ -228,9 +236,15 @@ export async function handleIncoming(msg: Incoming) {
 
   if (msg.buttonId) return handleButton(employee, report, msg.buttonId);
 
+  if (msg.audio) {
+    const heard = await listen(employee, msg.audio, logged[0].id, voiceApi);
+    if (!heard) return;
+    msg = { ...msg, text: heard };
+  }
+
   const text = (msg.text ?? "").trim();
   if (!text) {
-    await sendText(employee.phone, employee.id, "I can only read text messages for now. Please type your tasks.");
+    await sendText(employee.phone, employee.id, "I can only read text and voice messages. Please type your tasks or send a voice message.");
     return;
   }
   const lower = text.toLowerCase();
@@ -324,6 +338,43 @@ export async function handleIncoming(msg: Incoming) {
     employee.id,
     "Sorry, I didn't understand that. To add more tasks, start with *add*, e.g. _add Visit XYZ Ltd_. Send *help* to see all commands.",
   );
+}
+
+/**
+ * Transcribes a voice message and returns it as the text the person would have typed,
+ * or null after telling them it couldn't be used.
+ */
+async function listen(
+  employee: Employee,
+  audio: NonNullable<Incoming["audio"]>,
+  messageId: number,
+  voiceApi: Pick<typeof voice, "downloadMedia" | "interpretVoice">,
+): Promise<string | null> {
+  if (voiceApi === voice && !voice.voiceEnabled()) {
+    await sendText(employee.phone, employee.id, "Voice messages aren't switched on yet. Please type your tasks, one per line.");
+    return null;
+  }
+  let result: voice.VoiceResult;
+  try {
+    const file = await voiceApi.downloadMedia(audio.mediaId);
+    result = await voiceApi.interpretVoice(file.data, audio.mimeType ?? file.mimeType, await todaysTasks(employee.id));
+  } catch (err) {
+    console.error("Voice message failed", audio.mediaId, err);
+    await sendText(employee.phone, employee.id, "Sorry, I couldn't listen to that voice message. Please send it again, or type your tasks.");
+    return null;
+  }
+  const heard = result.heard && result.heard !== result.english ? `${result.heard}\n→ ${result.english}` : result.english || result.heard;
+  await query("update messages set body = $2 where id = $1", [messageId, `🎤 ${heard || "(nothing heard)"}`]);
+
+  const text = voice.voiceToText(result);
+  if (!text) {
+    await sendText(
+      employee.phone,
+      employee.id,
+      `🎤 Sorry, I couldn't find any tasks in that voice message.${result.english ? `\nI heard: _${result.english}_` : ""}\n\nPlease try again, or type your tasks.`,
+    );
+  }
+  return text;
 }
 
 async function handleButton(employee: Employee, report: Report, buttonId: string) {
