@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { ensureReport, handleIncoming, parseStatusCommand, parseTaskLines, todaysTasks } from "../lib/bot";
 import { one, pool, query } from "../lib/db";
+import type { VoiceResult } from "../lib/voice";
 import { addDays, today } from "../lib/time";
 
 const SALES_EXEC = "919943991034"; // Arjun, Sales Executive 1
@@ -98,6 +99,47 @@ test("unfinished tasks carry forward to the next report", async () => {
   assert.equal(carried[0].description, "Check pump at Site A");
   assert.ok(carried[0].carried_from);
   await query("delete from daily_reports where report_date = $1", [tomorrow]);
+});
+
+test("voice messages add tasks and run commands", async () => {
+  const fake = (r: Partial<VoiceResult>) => ({
+    downloadMedia: async () => ({ data: Buffer.from("ogg"), mimeType: "audio/ogg" }),
+    interpretVoice: async (_a: Buffer, _m: string, tasks: { seq: number }[]) => {
+      seen = tasks.length;
+      return { heard: "", english: "", action: "unclear", tasks: [], command: "", ...r } as VoiceResult;
+    },
+  });
+  let seen = -1;
+  const say = (r: Partial<VoiceResult>) =>
+    handleIncoming({ phone: SALES_EXEC, audio: { mediaId: "m" }, waMessageId: `voice-${n++}` }, fake(r));
+  const id = await empId(SALES_EXEC);
+  const before = (await todaysTasks(id)).length;
+
+  await say({ heard: "ABC கம்பெனிக்கு போகணும், XYZ க்கு quotation அனுப்பணும்", english: "Go to ABC company, send quotation to XYZ", action: "tasks", tasks: ["Visit ABC company", "Send quotation to XYZ"] });
+  assert.equal(seen, before); // the model is shown the current list
+  const tasks = await todaysTasks(id);
+  assert.deepEqual(tasks.slice(-2).map((t) => t.description), ["Visit ABC company", "Send quotation to XYZ"]);
+  assert.match(await lastReply(SALES_EXEC), /Added 2 tasks/);
+  const logged = (await one<{ kind: string; body: string }>("select kind, body from messages where phone = $1 and direction = 'in' order by id desc limit 1", [SALES_EXEC]))!;
+  assert.equal(logged.kind, "voice");
+  assert.match(logged.body, /கம்பெனி[\s\S]*→ Go to ABC/);
+
+  const last = tasks.at(-1)!.seq;
+  await say({ english: "finished the XYZ quotation", action: "command", command: `${last} done` });
+  assert.equal((await todaysTasks(id)).at(-1)!.status, "done");
+
+  await say({ english: "hello?", action: "unclear" });
+  assert.match(await lastReply(SALES_EXEC), /couldn't find any tasks[\s\S]*hello\?/);
+
+  await handleIncoming({ phone: SALES_EXEC, audio: { mediaId: "m" }, waMessageId: `voice-${n++}` }, {
+    downloadMedia: async () => { throw new Error("network"); },
+    interpretVoice: async () => { throw new Error("unreachable"); },
+  });
+  assert.match(await lastReply(SALES_EXEC), /couldn't listen/);
+
+  // Without GEMINI_API_KEY the real service is off.
+  await handleIncoming({ phone: SALES_EXEC, audio: { mediaId: "m" }, waMessageId: `voice-${n++}` });
+  assert.match(await lastReply(SALES_EXEC), /aren't switched on/);
 });
 
 test("unknown numbers are told they are not registered", async () => {
