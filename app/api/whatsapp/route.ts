@@ -21,7 +21,11 @@ type WaMessage = {
   text?: { body: string };
   interactive?: { type: string; button_reply?: { id: string; title: string }; list_reply?: { id: string; title: string } };
   button?: { payload: string; text: string };
+  audio?: { id: string; mime_type?: string; voice?: boolean };
 };
+
+// Voice messages are transcribed after the response, which can take several seconds.
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   const raw = await req.text();
@@ -47,6 +51,7 @@ export async function POST(req: Request) {
           waMessageId: m.id,
           text: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title,
           buttonId: m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id,
+          audio: m.audio ? { mediaId: m.audio.id, mimeType: m.audio.mime_type } : undefined,
         });
       } catch (err) {
         console.error("Failed to handle WhatsApp message", m.id, err);
