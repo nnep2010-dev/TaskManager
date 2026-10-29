@@ -74,6 +74,7 @@ Leave `WHATSAPP_TOKEN` empty and the app runs in test mode: open **WhatsApp simu
 | `daily_tasks_morning` | Good morning {{1}}. What are your tasks for today? Reply with one task per line. |
 | `daily_tasks_reminder` | Hi {{1}}, a reminder to send today's tasks. Reply with one task per line. |
 | `daily_tasks_evening` | Hi {{1}}, time to update today's tasks. Reply to this message to see your list. |
+| `tasks_updated` | Hi {{1}}, {{2}} has updated your task list for {{3}}. Reply list to see your tasks. |
 
 Templates are only used when someone hasn't messaged the bot in the last 24 hours (a WhatsApp rule). Otherwise the bot sends normal messages and buttons.
 
