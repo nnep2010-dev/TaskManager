@@ -2,7 +2,7 @@ import { currentUser } from "@/lib/auth";
 import { exportRows } from "@/lib/dashboard";
 import { isValidDate, today } from "@/lib/time";
 
-const LABEL: Record<string, string> = { planned: "To do", in_progress: "In progress", done: "Done", not_done: "Not done" };
+const LABEL: Record<string, string> = { planned: "To do", in_progress: "In progress", partial: "Partially done", done: "Done", not_done: "Not done" };
 
 function csvCell(v: unknown) {
   const s = v == null ? "" : String(v);
@@ -21,9 +21,9 @@ export async function GET(req: Request) {
 
   const rows = await exportRows(date, dept);
   const lines = [
-    ["Date", "Department", "Name", "Role", "Reported", "Task #", "Task", "Status", "Carried over"].join(","),
+    ["Date", "Department", "Name", "Role", "Reported", "Task #", "Task", "Status", "Note", "Carried over"].join(","),
     ...rows.map((r) =>
-      [date, r.department, r.name, r.role, r.reported ? "Yes" : "No", r.seq, r.description, r.status ? LABEL[r.status] : "", r.carried ? "Yes" : ""]
+      [date, r.department, r.name, r.role, r.reported ? "Yes" : "No", r.seq, r.description, r.status ? LABEL[r.status] : "", r.note, r.carried ? "Yes" : ""]
         .map(csvCell)
         .join(","),
     ),
