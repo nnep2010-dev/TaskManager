@@ -17,16 +17,21 @@ export type Task = {
   seq: number;
   description: string;
   status: TaskStatus;
+  note: string | null;
   carried_from: number | null;
 };
 
-export type TaskStatus = "planned" | "in_progress" | "done" | "not_done";
+export type TaskStatus = "planned" | "in_progress" | "partial" | "done" | "not_done";
+
+/** Statuses that need a reason note from the person. */
+export const NEEDS_NOTE: TaskStatus[] = ["partial", "not_done"];
 
 type Report = { id: number; submitted_at: Date | null };
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   planned: "To do",
   in_progress: "In progress",
+  partial: "Partially done",
   done: "Done",
   not_done: "Not done",
 };
@@ -34,6 +39,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 const STATUS_MARK: Record<TaskStatus, string> = {
   planned: "▫️",
   in_progress: "⏳",
+  partial: "🌓",
   done: "✅",
   not_done: "❌",
 };
@@ -49,7 +55,9 @@ const HELP = [
   "• Send your tasks for today, one per line",
   "• Or send a 🎤 voice message in Tamil or English",
   "• *add* Call ABC Ltd  – add a task",
-  "• *2 done*  – mark task 2 done (also: *2 progress*, *2 not done*)",
+  "• *2 done*  – mark task 2 done (also: *2 progress*, *2 partial*, *2 not done*)",
+  "• *2 partial - waiting for material*  – add the reason in the same message",
+  "• *note 2* your note  – add a note to task 2",
   "• *all done*  – mark every task done",
   "• *remove 2*  – delete task 2",
   "• *list*  – see today's tasks",
@@ -65,7 +73,7 @@ export async function employeeByPhone(phone: string) {
   return one<Employee>(
     `select e.id, e.name, e.phone, e.role, e.department_id, d.name as department
        from employees e join departments d on d.id = e.department_id
-      where e.phone = $1 and e.active`,
+      where e.phone = $1 and e.active and d.active`,
     [phone],
   );
 }
@@ -102,7 +110,7 @@ export async function ensureReport(employeeId: number, date = today()): Promise<
     await client.query(
       `insert into tasks (report_id, employee_id, report_date, seq, description, status, carried_from)
        select $1, t.employee_id, $3, row_number() over (order by t.seq), t.description,
-              case when t.status = 'in_progress' then 'in_progress' else 'planned' end, t.id
+              case when t.status in ('in_progress', 'partial') then 'in_progress' else 'planned' end, t.id
          from tasks t
         where t.employee_id = $2
           and t.report_date = (select max(report_date) from daily_reports where employee_id = $2 and report_date < $3)
@@ -121,14 +129,18 @@ export async function ensureReport(employeeId: number, date = today()): Promise<
 
 export async function todaysTasks(employeeId: number, date = today()) {
   return query<Task>(
-    "select id, seq, description, status, carried_from from tasks where employee_id = $1 and report_date = $2 order by seq",
+    "select id, seq, description, status, note, carried_from from tasks where employee_id = $1 and report_date = $2 order by seq",
     [employeeId, date],
   );
 }
 
 function formatList(tasks: Task[]) {
   return tasks
-    .map((t) => `${STATUS_MARK[t.status]} ${t.seq}. ${t.description}${t.carried_from ? " _(carried over)_" : ""}`)
+    .map(
+      (t) =>
+        `${STATUS_MARK[t.status]} ${t.seq}. ${t.description}${t.carried_from ? " _(carried over)_" : ""}` +
+        (t.note ? `\n      📝 _${t.note}_` : ""),
+    )
     .join("\n");
 }
 
@@ -155,45 +167,138 @@ async function markSubmitted(reportId: number) {
   await query("update daily_reports set submitted_at = coalesce(submitted_at, now()) where id = $1", [reportId]);
 }
 
-const STATUS_WORDS: [RegExp, TaskStatus][] = [
-  [/^(done|completed?|finished|over|closed)$/, "done"],
-  [/^(in ?progress|progress|wip|ongoing|started)$/, "in_progress"],
-  [/^(not ?done|pending|cancel(l)?ed|skipped)$/, "not_done"],
-  [/^(todo|to do|planned|reopen)$/, "planned"],
+// Longest phrases first, so "partially done" wins over "partially". Phrases marked exact
+// only count when nothing follows them, so "2 over budget" isn't read as "2 done".
+const STATUS_PHRASES: [string, TaskStatus, "exact"?][] = [
+  ["partially completed", "partial"],
+  ["partially complete", "partial"],
+  ["partially done", "partial"],
+  ["partly done", "partial"],
+  ["half done", "partial"],
+  ["part done", "partial"],
+  ["partially", "partial"],
+  ["partial", "partial"],
+  ["not completed", "not_done"],
+  ["not complete", "not_done"],
+  ["not done", "not_done"],
+  ["notdone", "not_done"],
+  ["pending", "not_done"],
+  ["cancelled", "not_done"],
+  ["canceled", "not_done"],
+  ["skipped", "not_done"],
+  ["in progress", "in_progress"],
+  ["inprogress", "in_progress"],
+  ["progress", "in_progress"],
+  ["ongoing", "in_progress"],
+  ["started", "in_progress"],
+  ["wip", "in_progress"],
+  ["completed", "done"],
+  ["complete", "done"],
+  ["finished", "done"],
+  ["done", "done"],
+  ["over", "done", "exact"],
+  ["closed", "done", "exact"],
+  ["to do", "planned", "exact"],
+  ["todo", "planned", "exact"],
+  ["planned", "planned", "exact"],
+  ["reopen", "planned", "exact"],
 ];
 
-function statusFromWord(w: string): TaskStatus | null {
-  for (const [re, s] of STATUS_WORDS) if (re.test(w)) return s;
-  return null;
-}
-
-/** Matches "2 done", "2,3 done", "done 2 3", "2 in progress". */
-export function parseStatusCommand(text: string): { seqs: number[]; status: TaskStatus } | null {
-  const t = text.toLowerCase().replace(/\s+/g, " ").trim();
-  let m = t.match(/^((?:\d+[ ,]*(?:and )?)+)(?:is |are )?([a-z ]+)$/);
-  if (m) {
-    const status = statusFromWord(m[2].trim());
-    if (status) return { seqs: (m[1].match(/\d+/g) ?? []).map(Number), status };
-  }
-  m = t.match(/^([a-z ]+?) ((?:\d+[ ,]*(?:and )?)+)$/);
-  if (m) {
-    const status = statusFromWord(m[1].trim());
-    if (status) return { seqs: (m[2].match(/\d+/g) ?? []).map(Number), status };
+/** Reads a status phrase at the start of `lower`, returning the status and where the rest begins. */
+function statusAtStart(lower: string): { status: TaskStatus; end: number } | null {
+  for (const [phrase, status, exact] of STATUS_PHRASES) {
+    if (lower === phrase) return { status, end: phrase.length };
+    if (!exact && lower.startsWith(phrase) && /^[\s\-–:,.(]/.test(lower.slice(phrase.length))) {
+      return { status, end: phrase.length };
+    }
   }
   return null;
 }
 
-async function setStatus(employee: Employee, seqs: number[], status: TaskStatus) {
+/**
+ * Matches "2 done", "2,3 done", "done 2 3", "2 in progress", and a reason after the status:
+ * "2 not done - customer not available", "3 partial because material is late".
+ */
+export function parseStatusCommand(text: string): { seqs: number[]; status: TaskStatus; note?: string } | null {
+  if (/\n/.test(text.trim())) return null; // a multi-line message is a task list
+  const t = text.replace(/\s+/g, " ").trim();
+  const lower = t.toLowerCase();
+  let m = lower.match(/^((?:\d+[ ,]*(?:and )?)+)(?:is |are )?/);
+  if (m && m[0].length < lower.length) {
+    const found = statusAtStart(lower.slice(m[0].length));
+    if (found) {
+      const note = t
+        .slice(m[0].length + found.end)
+        .replace(/^[\s\-–:,.(]+/, "")
+        .replace(/^(because|reason)\b[\s:-]*/i, "")
+        .trim();
+      return { seqs: (m[1].match(/\d+/g) ?? []).map(Number), status: found.status, ...(note ? { note: note.slice(0, 1000) } : {}) };
+    }
+  }
+  m = lower.match(/^([a-z ]+?) ((?:\d+[ ,]*(?:and )?)+)$/);
+  if (m) {
+    const found = statusAtStart(m[1].trim());
+    if (found && found.end === m[1].trim().length) return { seqs: (m[2].match(/\d+/g) ?? []).map(Number), status: found.status };
+  }
+  return null;
+}
+
+async function setStatus(employee: Employee, seqs: number[], status: TaskStatus, note?: string) {
   const updated = await query<Task>(
-    `update tasks set status = $3, updated_at = now()
+    `update tasks set status = $3, note = coalesce($5, note), note_requested_at = null, updated_at = now()
       where employee_id = $1 and report_date = $2 and seq = any($4::int[])
-      returning id, seq, description, status, carried_from`,
-    [employee.id, today(), status, seqs],
+      returning id, seq, description, status, note, carried_from`,
+    [employee.id, today(), status, seqs, note ?? null],
   );
   return updated;
 }
 
-async function replyWithList(employee: Employee, intro?: string) {
+/** Today's partly done / not done tasks that still have no reason note, in task order. */
+async function tasksMissingNote(employeeId: number) {
+  return query<Task>(
+    `select id, seq, description, status, note, carried_from from tasks
+      where employee_id = $1 and report_date = $2 and status = any($3::text[]) and coalesce(note, '') = ''
+      order by seq`,
+    [employeeId, today(), NEEDS_NOTE],
+  );
+}
+
+/** The task whose reason the bot asked for and is still waiting on, if any. */
+export async function taskAwaitingNote(employeeId: number) {
+  return one<Task>(
+    `select id, seq, description, status, note, carried_from from tasks
+      where employee_id = $1 and report_date = $2 and note_requested_at is not null
+        and status = any($3::text[]) and coalesce(note, '') = ''
+      order by seq limit 1`,
+    [employeeId, today(), NEEDS_NOTE],
+  );
+}
+
+function noteQuestion(t: Task) {
+  const why = t.status === "partial" ? "is only partly done" : "wasn't done";
+  return `📝 Task ${t.seq} (${t.description}) ${why}. What's the reason? Please reply with a short note.`;
+}
+
+/**
+ * If any of today's partly done / not done tasks has no reason yet, asks for the first one
+ * and remembers that the next reply is that note. Returns the question, or "" if none is needed.
+ */
+async function askForNextNote(employeeId: number): Promise<string> {
+  const [next] = await tasksMissingNote(employeeId);
+  if (!next) return "";
+  await query("update tasks set note_requested_at = now() where id = $1", [next.id]);
+  return noteQuestion(next);
+}
+
+async function saveNote(employeeId: number, taskId: number, note: string) {
+  return one<Task>(
+    `update tasks set note = $3, note_requested_at = null, updated_at = now() where id = $1 and employee_id = $2
+     returning id, seq, description, status, note, carried_from`,
+    [taskId, employeeId, note.trim().slice(0, 1000)],
+  );
+}
+
+async function replyWithList(employee: Employee, intro?: string, outro?: string) {
   const tasks = await todaysTasks(employee.id);
   if (!tasks.length) {
     await sendText(employee.phone, employee.id, `${intro ? intro + "\n\n" : ""}You have no tasks for today yet. Send them one per line.`);
@@ -204,7 +309,8 @@ async function replyWithList(employee: Employee, intro?: string) {
   await sendText(
     employee.phone,
     employee.id,
-    `${intro ? intro + "\n\n" : ""}*Today's tasks* (${done}/${tasks.length} done)\n${formatList(tasks)}\n\nReply e.g. *${example} done* to update, or *add* a new task.`,
+    `${intro ? intro + "\n\n" : ""}*Today's tasks* (${done}/${tasks.length} done)\n${formatList(tasks)}\n\n` +
+      (outro || `Reply e.g. *${example} done* to update, or *add* a new task.`),
   );
 }
 
@@ -228,6 +334,15 @@ export async function handleIncoming(msg: Incoming, voiceApi: Pick<typeof voice,
 
   const employee = await employeeByPhone(msg.phone);
   if (!employee) {
+    const paused = await one<{ id: number }>(
+      `select e.id from employees e join departments d on d.id = e.department_id
+        where e.phone = $1 and e.active and not d.active`,
+      [msg.phone],
+    );
+    if (paused) {
+      await sendText(msg.phone, paused.id, "Task updates are paused for your team for now. We'll let you know when they start again.");
+      return;
+    }
     await sendText(msg.phone, null, "Sorry, this number isn't registered for task updates. Please contact the admin.");
     return;
   }
@@ -270,7 +385,26 @@ export async function handleIncoming(msg: Incoming, voiceApi: Pick<typeof voice,
   }
 
   if (/^(list|tasks|status|today|my tasks)$/.test(lower)) {
-    await replyWithList(employee);
+    const waiting = await taskAwaitingNote(employee.id);
+    await replyWithList(employee, undefined, waiting ? noteQuestion(waiting) : undefined);
+    return;
+  }
+
+  const noteMatch = text.match(/^(?:note|reason|remark)s?\s*(?:for\s*)?(?:task\s*)?#?(\d+)\b[\s:\-–]*([\s\S]*)$/i);
+  if (noteMatch) {
+    const seq = Number(noteMatch[1]);
+    const body = noteMatch[2].trim();
+    const task = (await todaysTasks(employee.id)).find((t) => t.seq === seq);
+    if (!task) {
+      await replyWithList(employee, `There's no task ${seq} today.`);
+    } else if (!body) {
+      await query("update tasks set note_requested_at = now() where id = $1", [task.id]);
+      await sendText(employee.phone, employee.id, `📝 What's the note for task ${seq} (${task.description})?`);
+    } else {
+      await saveNote(employee.id, task.id, body);
+      await markSubmitted(report.id);
+      await replyWithList(employee, `📝 Note saved for task ${seq}.`, await askForNextNote(employee.id));
+    }
     return;
   }
 
@@ -311,18 +445,27 @@ export async function handleIncoming(msg: Incoming, voiceApi: Pick<typeof voice,
 
   const statusCmd = parseStatusCommand(text);
   if (statusCmd) {
-    const updated = await setStatus(employee, statusCmd.seqs, statusCmd.status);
+    const updated = await setStatus(employee, statusCmd.seqs, statusCmd.status, statusCmd.note);
     if (updated.length) await markSubmitted(report.id);
     const missing = statusCmd.seqs.filter((s) => !updated.some((u) => u.seq === s));
     const intro = updated.length
       ? `Updated: ${updated.map((u) => u.seq).join(", ")} → ${STATUS_LABEL[statusCmd.status]}.` +
         (missing.length ? ` No task ${missing.join(", ")} today.` : "")
       : `There's no task ${missing.join(", ")} today.`;
-    await replyWithList(employee, intro);
+    await replyWithList(employee, intro, await askForNextNote(employee.id));
     return;
   }
 
   if (await handleServiceCommand(employee, text)) return;
+
+  // The bot asked why a task was partly done or not done: this message is the reason.
+  const waiting = await taskAwaitingNote(employee.id);
+  if (waiting) {
+    await saveNote(employee.id, waiting.id, text);
+    const next = await askForNextNote(employee.id);
+    await sendText(employee.phone, employee.id, `📝 Thanks, noted for task ${waiting.seq}.${next ? `\n\n${next}` : ""}`);
+    return;
+  }
 
   // Anything else: if they haven't sent today's plan yet, treat it as their task list.
   if (!report.submitted_at) {
@@ -357,7 +500,8 @@ async function listen(
   let result: voice.VoiceResult;
   try {
     const file = await voiceApi.downloadMedia(audio.mediaId);
-    result = await voiceApi.interpretVoice(file.data, audio.mimeType ?? file.mimeType, await todaysTasks(employee.id));
+    const waiting = await taskAwaitingNote(employee.id);
+    result = await voiceApi.interpretVoice(file.data, audio.mimeType ?? file.mimeType, await todaysTasks(employee.id), waiting);
   } catch (err) {
     console.error("Voice message failed", audio.mediaId, err);
     await sendText(employee.phone, employee.id, "Sorry, I couldn't listen to that voice message. Please send it again, or type your tasks.");
@@ -397,25 +541,26 @@ async function handleButton(employee: Employee, report: Report, buttonId: string
     for (const t of open) {
       await sendButtons(employee.phone, employee.id, `${t.seq}. ${t.description}`, [
         { id: `task:${t.id}:done`, title: "Done" },
-        { id: `task:${t.id}:in_progress`, title: "In progress" },
+        { id: `task:${t.id}:partial`, title: "Partially done" },
         { id: `task:${t.id}:not_done`, title: "Not done" },
       ]);
     }
     return;
   }
 
-  const m = buttonId.match(/^task:(\d+):(done|in_progress|not_done)$/);
+  const m = buttonId.match(/^task:(\d+):(done|in_progress|partial|not_done)$/);
   if (m) {
     const t = await one<Task>(
-      `update tasks set status = $3, updated_at = now() where id = $1 and employee_id = $2
-       returning id, seq, description, status, carried_from`,
+      `update tasks set status = $3, note_requested_at = null, updated_at = now() where id = $1 and employee_id = $2
+       returning id, seq, description, status, note, carried_from`,
       [Number(m[1]), employee.id, m[2]],
     );
     if (t) await markSubmitted(report.id);
+    const ask = t ? await askForNextNote(employee.id) : "";
     await sendText(
       employee.phone,
       employee.id,
-      t ? `${STATUS_MARK[t.status]} Task ${t.seq} marked *${STATUS_LABEL[t.status]}*.` : "That task no longer exists.",
+      t ? `${STATUS_MARK[t.status]} Task ${t.seq} marked *${STATUS_LABEL[t.status]}*.${ask ? `\n\n${ask}` : ""}` : "That task no longer exists.",
     );
     return;
   }
@@ -474,7 +619,7 @@ async function activeStaff() {
   return query<Employee>(
     `select e.id, e.name, e.phone, e.role, e.department_id, d.name as department
        from employees e join departments d on d.id = e.department_id
-      where e.active and e.phone is not null
+      where e.active and d.active and e.phone is not null
       order by d.sort_order, e.id`,
   );
 }
@@ -538,7 +683,7 @@ export async function sendEveningPrompts() {
       await sendButtons(
         e.phone,
         e.id,
-        `Good evening ${firstName(e)}! How did today go?\n\n${formatList(tasks)}\n\nTap a button, or reply e.g. *1 done*, *2 not done*.`,
+        `Good evening ${firstName(e)}! How did today go?\n\n${formatList(tasks)}\n\nTap a button, or reply e.g. *1 done*, *2 partial - reason*, *3 not done - reason*.`,
         [
           { id: "eve:alldone", title: "All done" },
           { id: "eve:each", title: "Update each task" },
