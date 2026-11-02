@@ -17,7 +17,7 @@ export function DateBar({ date, path, exportDept }: { date: string; path: string
 
 export function StatusPill({ status }: { status: string }) {
   const label: Record<string, string> = {
-    planned: "To do", in_progress: "In progress", done: "Done", not_done: "Not done", pending: "Pending", closed: "Closed",
+    planned: "To do", in_progress: "In progress", partial: "Partially done", done: "Done", not_done: "Not done", pending: "Pending", closed: "Closed",
   };
   return <span className={`pill ${status}`}>{label[status] ?? status}</span>;
 }
