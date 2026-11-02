@@ -29,7 +29,9 @@ export async function downloadMedia(mediaId: string) {
 }
 
 const COMMANDS = [
-  "N done / N progress / N not done (several: 1, 3 done)",
+  "N done / N progress / N partial / N not done (several: 1, 3 done)",
+  "N partial - reason / N not done - reason (when they say why, put the reason in English after the dash)",
+  "note N text (a note or the reason for task N, in English)",
   "all done",
   "remove N",
   "list",
@@ -40,14 +42,16 @@ const COMMANDS = [
   "help",
 ].join("\n");
 
-function prompt(tasks: { seq: number; description: string; status: string }[]) {
+type TaskLine = { seq: number; description: string; status: string };
+
+function prompt(tasks: TaskLine[], awaitingNote?: TaskLine | null) {
   return `You read WhatsApp voice messages sent by staff of an engineering company in Tamil Nadu, India, to a daily task bot.
 They may speak Tamil, English, or a mix of both.
 
 Today's task list for this person:
 ${tasks.length ? tasks.map((t) => `${t.seq}. ${t.description} (${t.status})`).join("\n") : "(no tasks yet)"}
 
-Decide what the message is:
+${awaitingNote ? `The bot has just asked them why task ${awaitingNote.seq} (${awaitingNote.description}) was ${awaitingNote.status === "partial" ? "only partly done" : "not done"}. If they are giving that reason, reply with the command "note ${awaitingNote.seq} <the reason in English>".\n\n` : ""}Decide what the message is:
 - "tasks": they are telling you work they will do or are doing. Put each task in "tasks" as a short English line, like a person would type it (e.g. "Visit ABC Industries for demo"). Keep customer, company, place and product names exactly as spoken. Do not add tasks they did not say.
 - "command": they are updating their list. Put the one matching command in "command", using a task number from the list above, e.g. "2 done" if they say they finished the second task or a task that matches number 2. Commands:
 ${COMMANDS}
@@ -72,7 +76,8 @@ const SCHEMA = {
 export async function interpretVoice(
   audio: Buffer,
   mimeType: string,
-  tasks: { seq: number; description: string; status: string }[],
+  tasks: TaskLine[],
+  awaitingNote?: TaskLine | null,
 ): Promise<VoiceResult> {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
     method: "POST",
@@ -81,7 +86,7 @@ export async function interpretVoice(
       contents: [
         {
           parts: [
-            { text: prompt(tasks) },
+            { text: prompt(tasks, awaitingNote) },
             { inline_data: { mime_type: mimeType.split(";")[0].trim(), data: audio.toString("base64") } },
           ],
         },
