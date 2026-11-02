@@ -23,10 +23,21 @@ export async function departmentSummaries(date: string, onlyDepartmentId?: numbe
        left join employees e on e.department_id = d.id and e.active
        left join daily_reports r on r.employee_id = e.id and r.report_date = $1
        left join tasks t on t.employee_id = e.id and t.report_date = $1
-      where ($2::int is null or d.id = $2)
+      where (d.id = $2 or ($2::int is null and d.active))
       group by d.id
       order by d.sort_order`,
     [date, onlyDepartmentId ?? null],
+  );
+}
+
+/** Departments that are paused: no WhatsApp prompts and hidden from the home page. */
+export async function pausedDepartments() {
+  return query<{ id: number; name: string; staff: number }>(
+    `select d.id, d.name, count(e.id)::int as staff
+       from departments d left join employees e on e.department_id = d.id and e.active
+      where not d.active
+      group by d.id
+      order by d.sort_order`,
   );
 }
 
@@ -37,15 +48,15 @@ export type PersonDay = {
   is_head: boolean;
   phone: string | null;
   submitted_at: Date | null;
-  tasks: { seq: number; description: string; status: TaskStatus; carried: boolean }[];
+  tasks: { seq: number; description: string; status: TaskStatus; note: string | null; carried: boolean }[];
 };
 
 export async function departmentDetail(departmentId: number, date: string) {
-  const dept = await one<{ id: number; name: string }>("select id, name from departments where id = $1", [departmentId]);
+  const dept = await one<{ id: number; name: string; active: boolean }>("select id, name, active from departments where id = $1", [departmentId]);
   if (!dept) return null;
   const people = await query<PersonDay>(
     `select e.id, e.name, e.role, e.is_head, e.phone, r.submitted_at,
-            coalesce(json_agg(json_build_object('seq', t.seq, 'description', t.description, 'status', t.status,
+            coalesce(json_agg(json_build_object('seq', t.seq, 'description', t.description, 'status', t.status, 'note', t.note,
                      'carried', t.carried_from is not null) order by t.seq) filter (where t.id is not null), '[]') as tasks
        from employees e
        left join daily_reports r on r.employee_id = e.id and r.report_date = $2
@@ -102,7 +113,7 @@ export async function personHistory(employeeId: number, days = 14) {
   if (!person) return null;
   const daysRows = await query<{ report_date: string; submitted_at: Date | null; tasks: PersonDay["tasks"] }>(
     `select r.report_date, r.submitted_at,
-            coalesce(json_agg(json_build_object('seq', t.seq, 'description', t.description, 'status', t.status,
+            coalesce(json_agg(json_build_object('seq', t.seq, 'description', t.description, 'status', t.status, 'note', t.note,
                      'carried', t.carried_from is not null) order by t.seq) filter (where t.id is not null), '[]') as tasks
        from daily_reports r left join tasks t on t.report_id = r.id
       where r.employee_id = $1
@@ -115,14 +126,14 @@ export async function personHistory(employeeId: number, days = 14) {
 }
 
 export async function exportRows(date: string, onlyDepartmentId?: number | null) {
-  return query<{ department: string; name: string; role: string; seq: number | null; description: string | null; status: string | null; carried: boolean | null; reported: boolean }>(
-    `select d.name as department, e.name, e.role, t.seq, t.description, t.status,
+  return query<{ department: string; name: string; role: string; seq: number | null; description: string | null; status: string | null; note: string | null; carried: boolean | null; reported: boolean }>(
+    `select d.name as department, e.name, e.role, t.seq, t.description, t.status, t.note,
             t.carried_from is not null as carried, r.submitted_at is not null as reported
        from employees e
        join departments d on d.id = e.department_id
        left join daily_reports r on r.employee_id = e.id and r.report_date = $1
        left join tasks t on t.employee_id = e.id and t.report_date = $1
-      where e.active and ($2::int is null or d.id = $2)
+      where e.active and (d.id = $2 or ($2::int is null and d.active))
       order by d.sort_order, e.is_head desc, e.name, t.seq`,
     [date, onlyDepartmentId ?? null],
   );
