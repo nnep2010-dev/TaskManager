@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { StatusPill } from "@/components/DateBar";
+import { TaskRow } from "@/components/TaskRow";
 import { canSeePerson, requireUser } from "@/lib/auth";
 import { personHistory } from "@/lib/dashboard";
 import { formatDate, formatTime } from "@/lib/time";
@@ -35,12 +35,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </div>
           {d.tasks.length ? (
             <ul className="tasks">
-              {d.tasks.map((t) => (
-                <li key={t.seq}>
-                  <span>{t.seq}. {t.description}{t.carried && <span className="carried"> · carried over</span>}</span>
-                  <StatusPill status={t.status} />
-                </li>
-              ))}
+              {d.tasks.map((t) => <TaskRow key={t.seq} task={t} />)}
             </ul>
           ) : (
             <p className="empty">No tasks</p>
