@@ -6,7 +6,9 @@ Staff send their daily tasks to a company WhatsApp number. A bot saves them to a
 
 - **Morning (9:30 IST, Mon–Sat):** the bot asks everyone for today's tasks. People reply one task per line.
 - **11:00 IST:** one reminder to anyone who hasn't replied.
-- **Evening (18:00 IST):** the bot lists each person's tasks with buttons: *All done* or *Update each task* (Done / In progress / Not done).
+- **Evening (18:00 IST):** the bot lists each person's tasks with buttons: *All done* or *Update each task* (Done / Partially done / Not done). For *Partially done* or *Not done* the bot asks for the reason and saves it as a note on the task.
+- Every task can have a note, shown under the task on the dashboard and in the CSV export.
+- Departments can be paused from the dashboard: no WhatsApp prompts, hidden from the home page, nothing deleted.
 - Unfinished tasks carry over to the next day automatically.
 - Service engineers log and close service calls from WhatsApp.
 - **Dashboard:** home page with a tile per department (who reported, tasks done, who is missing), a page per department with a card per person, Service call numbers, each person's 30-day history, and CSV export for Excel.
@@ -20,7 +22,9 @@ Staff send their daily tasks to a company WhatsApp number. A bot saves them to a
 | Your tasks, one per line | Saves today's task list |
 | 🎤 A voice message (Tamil, English or mixed) | Adds the tasks you said, in English. You can also say things like "second task finished" |
 | `add Visit XYZ Ltd` | Adds a task |
-| `2 done` / `2 progress` / `2 not done` | Updates task 2 (several work too: `1, 3 done`) |
+| `2 done` / `2 progress` / `2 partial` / `2 not done` | Updates task 2 (several work too: `1, 3 done`). For partial or not done the bot asks why |
+| `2 partial - waiting for material` | Updates task 2 and saves the reason in one message |
+| `note 2 meeting moved to 4 pm` | Adds a note to task 2 |
 | `all done` | Marks every task done |
 | `remove 2` | Deletes task 2 |
 | `list` | Shows today's tasks |
