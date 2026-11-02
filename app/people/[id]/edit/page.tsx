@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: "planned", label: "To do" },
   { value: "in_progress", label: "In progress" },
+  { value: "partial", label: "Partially done" },
   { value: "done", label: "Done" },
   { value: "not_done", label: "Not done" },
 ];
@@ -35,12 +36,20 @@ async function saveTasks(formData: FormData) {
     }
     const description = String(formData.get(`description_${id}`) ?? "").trim();
     const status = String(formData.get(`status_${id}`) ?? "") as TaskStatus;
+    const note = String(formData.get(`note_${id}`) ?? "").trim().slice(0, 1000) || null;
     if (!description || !STATUSES.some((s) => s.value === status)) continue;
     if (old && old.description !== description) changes.edited.push(`${old.seq}. ${description}`);
     else if (old && old.status !== status) {
       changes.edited.push(`${old.seq}. ${description} – now ${STATUSES.find((s) => s.value === status)!.label}`);
+    } else if (old && (old.note ?? null) !== note && note) {
+      changes.edited.push(`${old.seq}. ${description} – note: ${note}`);
     }
-    await query("update tasks set description = $3, status = $4 where id = $1 and employee_id = $2", [id, employeeId, description, status]);
+    await query(
+      `update tasks set description = $3, status = $4, note = $5,
+              note_requested_at = case when $5::text is null then note_requested_at end
+        where id = $1 and employee_id = $2`,
+      [id, employeeId, description, status, note],
+    );
   }
 
   const newLines = String(formData.get("new_tasks") ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
@@ -108,12 +117,23 @@ export default async function EditTasksPage({
         <input type="hidden" name="date" value={date} />
         {tasks.length ? (
           <table className="list">
-            <thead><tr><th>#</th><th>Task</th><th>Status</th><th>Delete</th></tr></thead>
+            <thead><tr><th>#</th><th>Task and note</th><th>Status</th><th>Delete</th></tr></thead>
             <tbody>
               {tasks.map((t) => (
                 <tr key={t.id}>
                   <td>{t.seq}<input type="hidden" name="task_id" value={t.id} /></td>
-                  <td><input name={`description_${t.id}`} defaultValue={t.description} required aria-label={`Task ${t.seq}`} /></td>
+                  <td>
+                    <input name={`description_${t.id}`} defaultValue={t.description} required aria-label={`Task ${t.seq}`} />
+                    <textarea
+                      className="note"
+                      name={`note_${t.id}`}
+                      defaultValue={t.note ?? ""}
+                      rows={1}
+                      placeholder="Note (reason if partially done or not done)"
+                      aria-label={`Note for task ${t.seq}`}
+                      style={{ marginTop: 4 }}
+                    />
+                  </td>
                   <td>
                     <select name={`status_${t.id}`} defaultValue={t.status} aria-label={`Status of task ${t.seq}`}>
                       {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
