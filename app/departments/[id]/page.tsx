@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DateBar, StatusPill } from "@/components/DateBar";
+import { TaskRow } from "@/components/TaskRow";
+import { setDepartmentActive } from "@/app/departments/actions";
 import { canSeeDepartment, requireUser } from "@/lib/auth";
 import { departmentDetail, recentCalls, serviceStats } from "@/lib/dashboard";
 import { formatTime, isValidDate, today } from "@/lib/time";
@@ -43,6 +45,20 @@ export default async function DepartmentPage({
         <DateBar date={date} path={`/departments/${id}`} exportDept={id} />
       </div>
 
+      {!dept.active && (
+        <div className="notice">
+          This department is paused: its staff get no WhatsApp prompts and it is hidden from the home page.
+          {user.access === "proprietor" && (
+            <form action={setDepartmentActive} style={{ display: "inline", marginLeft: 8 }}>
+              <input type="hidden" name="department_id" value={id} />
+              <input type="hidden" name="active" value="true" />
+              <input type="hidden" name="back" value={`/departments/${id}`} />
+              <button type="submit">Resume {dept.name}</button>
+            </form>
+          )}
+        </div>
+      )}
+
       {stats && (
         <div className="kpis">
           <div className="card kpi"><div className="num">{stats.total}</div><div className="label">Total calls</div></div>
@@ -70,15 +86,7 @@ export default async function DepartmentPage({
             </div>
             {p.tasks.length ? (
               <ul className="tasks">
-                {p.tasks.map((t) => (
-                  <li key={t.seq}>
-                    <span>
-                      {t.seq}. {t.description}
-                      {t.carried && <span className="carried"> · carried over</span>}
-                    </span>
-                    <StatusPill status={t.status} />
-                  </li>
-                ))}
+                {p.tasks.map((t) => <TaskRow key={t.seq} task={t} />)}
               </ul>
             ) : (
               <p className="empty">No tasks</p>
@@ -108,6 +116,16 @@ export default async function DepartmentPage({
             <p className="empty">No service calls logged yet.</p>
           )}
         </>
+      )}
+
+      {user.access === "proprietor" && dept.active && (
+        <form action={setDepartmentActive} className="paused-list">
+          <input type="hidden" name="department_id" value={id} />
+          <input type="hidden" name="active" value="false" />
+          <input type="hidden" name="back" value="/" />
+          <button type="submit" className="secondary">Pause {dept.name}</button>{" "}
+          <span className="sub">Stops WhatsApp prompts for this team and hides it from the home page. Nothing is deleted.</span>
+        </form>
       )}
     </>
   );
