@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DateBar } from "@/components/DateBar";
 import { requireUser } from "@/lib/auth";
-import { departmentSummaries } from "@/lib/dashboard";
+import { departmentSummaries, pausedDepartments } from "@/lib/dashboard";
+import { setDepartmentActive } from "@/app/departments/actions";
 import { isValidDate, today } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   if (user.access === "staff") redirect(user.employee_id ? `/people/${user.employee_id}` : "/account");
   if (user.access === "head" && user.department_id) redirect(`/departments/${user.department_id}?date=${date}`);
 
-  const depts = await departmentSummaries(date);
+  const [depts, paused] = await Promise.all([departmentSummaries(date), pausedDepartments()]);
   const staff = depts.reduce((n, d) => n + d.staff, 0);
   const reported = depts.reduce((n, d) => n + d.reported, 0);
   const tasks = depts.reduce((n, d) => n + d.tasks, 0);
@@ -42,6 +43,25 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
           </Link>
         ))}
       </div>
+      {paused.length > 0 && (
+        <div className="paused-list sub">
+          <b>Paused:</b>{" "}
+          {paused.map((d, i) => (
+            <span key={d.id}>
+              {i > 0 && " · "}
+              <Link href={`/departments/${d.id}?date=${date}`}>{d.name}</Link> ({d.staff})
+              {user.access === "proprietor" && (
+                <form action={setDepartmentActive}>
+                  <input type="hidden" name="department_id" value={d.id} />
+                  <input type="hidden" name="active" value="true" />
+                  <input type="hidden" name="back" value="/" />{" "}
+                  <button type="submit" className="link">Resume</button>
+                </form>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
     </>
   );
 }
