@@ -3,7 +3,8 @@
 create table if not exists departments (
   id serial primary key,
   name text not null unique,
-  sort_order int not null default 0
+  sort_order int not null default 0,
+  active boolean not null default true  -- paused departments get no WhatsApp prompts and are hidden from the dashboard
 );
 
 create table if not exists employees (
@@ -47,7 +48,9 @@ create table if not exists tasks (
   seq int not null,                  -- the number staff use in "3 done"
   description text not null,
   status text not null default 'planned'
-    check (status in ('planned', 'in_progress', 'done', 'not_done')),
+    check (status in ('planned', 'in_progress', 'partial', 'done', 'not_done')),
+  note text,                         -- reason or remark; asked for when a task is partly done or not done
+  note_requested_at timestamptz,     -- when the bot asked for the note, so the next reply is saved as it
   carried_from int references tasks(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -80,3 +83,10 @@ create table if not exists messages (
   created_at timestamptz not null default now()
 );
 create index if not exists messages_phone_idx on messages (phone, created_at);
+
+-- Upgrades for databases created before these columns existed.
+alter table departments add column if not exists active boolean not null default true;
+alter table tasks add column if not exists note text;
+alter table tasks add column if not exists note_requested_at timestamptz;
+alter table tasks drop constraint if exists tasks_status_check;
+alter table tasks add constraint tasks_status_check check (status in ('planned', 'in_progress', 'partial', 'done', 'not_done'));
