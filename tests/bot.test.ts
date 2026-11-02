@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { ensureReport, handleIncoming, parseStatusCommand, parseTaskLines, todaysTasks } from "../lib/bot";
+import { ensureReport, handleIncoming, parseStatusCommand, parseTaskLines, sendMorningPrompts, todaysTasks } from "../lib/bot";
 import { one, pool, query } from "../lib/db";
 import type { VoiceResult } from "../lib/voice";
 import { addDays, today } from "../lib/time";
@@ -34,6 +34,14 @@ test("parses status commands", () => {
   assert.deepEqual(parseStatusCommand("3 not done"), { seqs: [3], status: "not_done" });
   assert.equal(parseStatusCommand("Visit ABC 2 times"), null);
   assert.equal(parseStatusCommand("close 12"), null);
+  assert.deepEqual(parseStatusCommand("2 partial"), { seqs: [2], status: "partial" });
+  assert.deepEqual(parseStatusCommand("2 partially done"), { seqs: [2], status: "partial" });
+  assert.deepEqual(parseStatusCommand("3 not done - Customer not available"), { seqs: [3], status: "not_done", note: "Customer not available" });
+  assert.deepEqual(parseStatusCommand("1 partially done because material came late"), { seqs: [1], status: "partial", note: "material came late" });
+  assert.deepEqual(parseStatusCommand("4 done, sent by courier"), { seqs: [4], status: "done", note: "sent by courier" });
+  assert.equal(parseStatusCommand("2 over budget"), null);
+  assert.equal(parseStatusCommand("2 days delay in material"), null);
+  assert.equal(parseStatusCommand("1 done\n2 Visit ABC"), null);
 });
 
 test("splits task lines and strips list markers", () => {
@@ -140,6 +148,71 @@ test("voice messages add tasks and run commands", async () => {
   // Without GEMINI_API_KEY the real service is off.
   await handleIncoming({ phone: SALES_EXEC, audio: { mediaId: "m" }, waMessageId: `voice-${n++}` });
   assert.match(await lastReply(SALES_EXEC), /aren't switched on/);
+});
+
+test("partly done and not done tasks ask for a reason note", async () => {
+  await query("delete from tasks"); await query("delete from daily_reports");
+  const id = await empId(SALES_EXEC);
+  await send(SALES_EXEC, "Visit ABC\nSend quote to XYZ\nCall KLM");
+
+  await send(SALES_EXEC, "1 partial");
+  assert.match(await lastReply(SALES_EXEC), /Task 1 \(Visit ABC\) is only partly done\. What's the reason/);
+  await send(SALES_EXEC, "Customer asked to come tomorrow");
+  let tasks = await todaysTasks(id);
+  assert.deepEqual([tasks[0].status, tasks[0].note], ["partial", "Customer asked to come tomorrow"]);
+  assert.match(await lastReply(SALES_EXEC), /noted for task 1/);
+
+  // A reason in the same message is saved straight away, with no question.
+  await send(SALES_EXEC, "2 not done - price not approved");
+  tasks = await todaysTasks(id);
+  assert.deepEqual([tasks[1].status, tasks[1].note], ["not_done", "price not approved"]);
+  assert.doesNotMatch(await lastReply(SALES_EXEC), /What's the reason/);
+  assert.match(await lastReply(SALES_EXEC), /📝 _price not approved_/);
+
+  // Evening buttons: "Partially done" then the reason.
+  await send(SALES_EXEC, undefined, "eve:each");
+  const btns = (await one<{ buttons: { id: string; title: string }[] }>(
+    "select buttons from messages where phone = $1 and buttons is not null order by id desc limit 1", [SALES_EXEC]))!.buttons;
+  assert.deepEqual(btns.map((b) => b.title), ["Done", "Partially done", "Not done"]);
+  await send(SALES_EXEC, undefined, `task:${tasks[2].id}:not_done`);
+  assert.match(await lastReply(SALES_EXEC), /Task 3 \(Call KLM\) wasn't done\. What's the reason/);
+  await send(SALES_EXEC, "list");
+  assert.match(await lastReply(SALES_EXEC), /Task 3 \(Call KLM\) wasn't done/); // still waiting
+  await send(SALES_EXEC, "Phone switched off");
+  assert.equal((await todaysTasks(id))[2].note, "Phone switched off");
+
+  // Notes on any task, any time.
+  await send(SALES_EXEC, "note 1 meeting fixed for 11 am");
+  assert.equal((await todaysTasks(id))[0].note, "meeting fixed for 11 am");
+
+  // Once nothing is waiting, free text is not taken as a note.
+  await send(SALES_EXEC, "random words here");
+  assert.match(await lastReply(SALES_EXEC), /didn't understand/);
+
+  // Partly done tasks carry over as in progress, without yesterday's note.
+  const tomorrow = addDays(today(), 1);
+  await ensureReport(id, tomorrow);
+  const carried = await query<{ seq: number; status: string; note: string | null }>(
+    "select seq, status, note from tasks where employee_id = $1 and report_date = $2 order by seq", [id, tomorrow]);
+  assert.deepEqual(carried, [{ seq: 1, status: "in_progress", note: null }, { seq: 2, status: "planned", note: null }, { seq: 3, status: "planned", note: null }]);
+  await query("delete from daily_reports where report_date = $1", [tomorrow]);
+});
+
+test("paused departments get no prompts and the bot tells their staff", async () => {
+  await query("update departments set active = false where name = 'Service'");
+  try {
+    await send(SERVICE_ENG, "hi");
+    assert.match(await lastReply(SERVICE_ENG), /paused for your team/);
+    await query("delete from daily_reports where report_date = $1", [today()]);
+    await sendMorningPrompts();
+    const prompted = await query<{ dept: string }>(
+      `select distinct d.name as dept from daily_reports r join employees e on e.id = r.employee_id
+         join departments d on d.id = e.department_id where r.report_date = $1 and r.prompted_at is not null`, [today()]);
+    assert.ok(prompted.length > 0);
+    assert.ok(!prompted.some((p) => p.dept === "Service"));
+  } finally {
+    await query("update departments set active = true");
+  }
 });
 
 test("unknown numbers are told they are not registered", async () => {
