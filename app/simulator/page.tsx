@@ -39,7 +39,7 @@ export default async function Simulator({ searchParams }: { searchParams: Promis
   if (user.access !== "proprietor") notFound();
   const staff = await query<{ name: string; role: string; phone: string; department: string }>(
     `select e.name, e.role, e.phone, d.name as department from employees e join departments d on d.id = e.department_id
-      where e.active and e.phone is not null order by d.sort_order, e.is_head desc, e.name`,
+      where e.active and d.active and e.phone is not null order by d.sort_order, e.is_head desc, e.name`,
   );
   const phone = (await searchParams).phone ?? staff[0]?.phone;
   const person = staff.find((s) => s.phone === phone);
