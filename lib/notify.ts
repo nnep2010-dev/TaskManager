@@ -8,6 +8,7 @@ const TEMPLATE_UPDATED = process.env.TEMPLATE_TASKS_UPDATED ?? "tasks_updated";
 const STATUS_MARK: Record<TaskStatus, string> = {
   planned: "▫️",
   in_progress: "⏳",
+  partial: "🌓",
   done: "✅",
   not_done: "❌",
 };
