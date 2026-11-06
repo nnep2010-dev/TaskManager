@@ -219,3 +219,31 @@ test("unknown numbers are told they are not registered", async () => {
   await send("919999999999", "hello");
   assert.match(await lastReply("919999999999"), /isn't registered/);
 });
+
+test("tasks record when they were added and completed", async () => {
+  await query("delete from tasks");
+  await query("delete from daily_reports");
+  await send(SALES_EXEC, "Visit ABC\nSend quote\nCall KLM");
+  const id = await empId(SALES_EXEC);
+  const times = () =>
+    query<{ seq: number; added: boolean; completed: boolean }>(
+      "select seq, created_at is not null as added, completed_at is not null as completed from tasks where employee_id = $1 and report_date = $2 order by seq",
+      [id, today()],
+    );
+  assert.deepEqual((await times()).map((t) => [t.added, t.completed]), [[true, false], [true, false], [true, false]]);
+
+  await send(SALES_EXEC, "1 done");
+  await send(SALES_EXEC, "2 partial - waiting for price");
+  await send(SALES_EXEC, "3 in progress");
+  assert.deepEqual((await times()).map((t) => t.completed), [true, true, false]);
+
+  // A note or description change keeps the time; moving a task back to an open status clears it.
+  const before = await one<{ completed_at: Date }>("select completed_at from tasks where employee_id = $1 and seq = 1", [id]);
+  await query("select pg_sleep(0.01)");
+  await send(SALES_EXEC, "note 1 handed over to customer");
+  await query("update tasks set description = 'Visit ABC Ltd' where employee_id = $1 and seq = 1", [id]);
+  const after = await one<{ completed_at: Date }>("select completed_at from tasks where employee_id = $1 and seq = 1", [id]);
+  assert.equal(after!.completed_at.getTime(), before!.completed_at.getTime());
+  await send(SALES_EXEC, "1 in progress");
+  assert.deepEqual((await times()).map((t) => t.completed), [false, true, false]);
+});

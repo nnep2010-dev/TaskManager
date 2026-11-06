@@ -1,6 +1,6 @@
 import { currentUser } from "@/lib/auth";
 import { exportRows } from "@/lib/dashboard";
-import { isValidDate, today } from "@/lib/time";
+import { formatStamp, isValidDate, today } from "@/lib/time";
 
 const LABEL: Record<string, string> = { planned: "To do", in_progress: "In progress", partial: "Partially done", done: "Done", not_done: "Not done" };
 
@@ -21,9 +21,9 @@ export async function GET(req: Request) {
 
   const rows = await exportRows(date, dept);
   const lines = [
-    ["Date", "Department", "Name", "Role", "Reported", "Task #", "Task", "Status", "Note", "Carried over"].join(","),
+    ["Date", "Department", "Name", "Role", "Reported", "Task #", "Task", "Status", "Note", "Carried over", "Added (IST)", "Completed (IST)"].join(","),
     ...rows.map((r) =>
-      [date, r.department, r.name, r.role, r.reported ? "Yes" : "No", r.seq, r.description, r.status ? LABEL[r.status] : "", r.note, r.carried ? "Yes" : ""]
+      [date, r.department, r.name, r.role, r.reported ? "Yes" : "No", r.seq, r.description, r.status ? LABEL[r.status] : "", r.note, r.carried ? "Yes" : "", formatStamp(r.added_at, date), formatStamp(r.completed_at, date)]
         .map(csvCell)
         .join(","),
     ),

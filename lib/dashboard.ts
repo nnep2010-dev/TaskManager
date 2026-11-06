@@ -48,7 +48,7 @@ export type PersonDay = {
   is_head: boolean;
   phone: string | null;
   submitted_at: Date | null;
-  tasks: { seq: number; description: string; status: TaskStatus; note: string | null; carried: boolean }[];
+  tasks: { seq: number; description: string; status: TaskStatus; note: string | null; carried: boolean; added_at: string; completed_at: string | null }[];
 };
 
 export async function departmentDetail(departmentId: number, date: string) {
@@ -57,7 +57,7 @@ export async function departmentDetail(departmentId: number, date: string) {
   const people = await query<PersonDay>(
     `select e.id, e.name, e.role, e.is_head, e.phone, r.submitted_at,
             coalesce(json_agg(json_build_object('seq', t.seq, 'description', t.description, 'status', t.status, 'note', t.note,
-                     'carried', t.carried_from is not null) order by t.seq) filter (where t.id is not null), '[]') as tasks
+                     'carried', t.carried_from is not null, 'added_at', t.created_at, 'completed_at', t.completed_at) order by t.seq) filter (where t.id is not null), '[]') as tasks
        from employees e
        left join daily_reports r on r.employee_id = e.id and r.report_date = $2
        left join tasks t on t.employee_id = e.id and t.report_date = $2
@@ -114,7 +114,7 @@ export async function personHistory(employeeId: number, days = 14) {
   const daysRows = await query<{ report_date: string; submitted_at: Date | null; tasks: PersonDay["tasks"] }>(
     `select r.report_date, r.submitted_at,
             coalesce(json_agg(json_build_object('seq', t.seq, 'description', t.description, 'status', t.status, 'note', t.note,
-                     'carried', t.carried_from is not null) order by t.seq) filter (where t.id is not null), '[]') as tasks
+                     'carried', t.carried_from is not null, 'added_at', t.created_at, 'completed_at', t.completed_at) order by t.seq) filter (where t.id is not null), '[]') as tasks
        from daily_reports r left join tasks t on t.report_id = r.id
       where r.employee_id = $1
       group by r.id
@@ -126,9 +126,10 @@ export async function personHistory(employeeId: number, days = 14) {
 }
 
 export async function exportRows(date: string, onlyDepartmentId?: number | null) {
-  return query<{ department: string; name: string; role: string; seq: number | null; description: string | null; status: string | null; note: string | null; carried: boolean | null; reported: boolean }>(
+  return query<{ department: string; name: string; role: string; seq: number | null; description: string | null; status: string | null; note: string | null; carried: boolean | null; reported: boolean; added_at: Date | null; completed_at: Date | null }>(
     `select d.name as department, e.name, e.role, t.seq, t.description, t.status, t.note,
-            t.carried_from is not null as carried, r.submitted_at is not null as reported
+            t.carried_from is not null as carried, r.submitted_at is not null as reported,
+            t.created_at as added_at, t.completed_at
        from employees e
        join departments d on d.id = e.department_id
        left join daily_reports r on r.employee_id = e.id and r.report_date = $1

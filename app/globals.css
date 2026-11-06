@@ -71,6 +71,7 @@ a.card:hover { text-decoration: none; border-color: var(--accent); }
 .pill.in_progress, .pill.partial { background: var(--warn-soft); color: var(--warn); }
 .task-note { display: block; font-size: 0.85em; color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
 .task-note.missing { color: var(--bad); }
+.task-times { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .paused-list { margin-top: 24px; }
 .paused-list form { display: inline; }
 .paused-list button.link { color: var(--accent); text-decoration: underline; }

@@ -8,6 +8,7 @@ Staff send their daily tasks to a company WhatsApp number. A bot saves them to a
 - **11:00 IST:** one reminder to anyone who hasn't replied.
 - **Evening (18:00 IST):** the bot lists each person's tasks with buttons: *All done* or *Update each task* (Done / Partially done / Not done). For *Partially done* or *Not done* the bot asks for the reason and saves it as a note on the task.
 - Every task can have a note, shown under the task on the dashboard and in the CSV export.
+- Every task records when it was added and when it was marked done or partly done (IST). Both times show under the task on the dashboard and in the CSV export.
 - Departments can be paused from the dashboard: no WhatsApp prompts, hidden from the home page, nothing deleted.
 - Unfinished tasks carry over to the next day automatically.
 - Service engineers log and close service calls from WhatsApp.

@@ -35,7 +35,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </div>
           {d.tasks.length ? (
             <ul className="tasks">
-              {d.tasks.map((t) => <TaskRow key={t.seq} task={t} />)}
+              {d.tasks.map((t) => <TaskRow key={t.seq} task={t} date={d.report_date} />)}
             </ul>
           ) : (
             <p className="empty">No tasks</p>

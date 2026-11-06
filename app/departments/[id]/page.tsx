@@ -86,7 +86,7 @@ export default async function DepartmentPage({
             </div>
             {p.tasks.length ? (
               <ul className="tasks">
-                {p.tasks.map((t) => <TaskRow key={t.seq} task={t} />)}
+                {p.tasks.map((t) => <TaskRow key={t.seq} task={t} date={date} />)}
               </ul>
             ) : (
               <p className="empty">No tasks</p>

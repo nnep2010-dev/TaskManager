@@ -20,6 +20,14 @@ export function formatTime(ts: Date | string | null): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: TIME_ZONE });
 }
 
+/** A time in the company's time zone; with the date too when it falls on a different day than `onDate`. */
+export function formatStamp(ts: Date | string | null, onDate?: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (!onDate || today(d) === onDate) return formatTime(d);
+  return `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: TIME_ZONE })}, ${formatTime(d)}`;
+}
+
 export function addDays(d: string, n: number): string {
   const t = new Date(`${d}T00:00:00Z`);
   t.setUTCDate(t.getUTCDate() + n);

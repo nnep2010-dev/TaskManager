@@ -52,7 +52,8 @@ create table if not exists tasks (
   note text,                         -- reason or remark; asked for when a task is partly done or not done
   note_requested_at timestamptz,     -- when the bot asked for the note, so the next reply is saved as it
   carried_from int references tasks(id),
-  created_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),   -- when the task was added
+  completed_at timestamptz,          -- when it was marked done or partly done (set by the trigger below)
   updated_at timestamptz not null default now(),
   unique (employee_id, report_date, seq)
 );
@@ -90,3 +91,17 @@ alter table tasks add column if not exists note text;
 alter table tasks add column if not exists note_requested_at timestamptz;
 alter table tasks drop constraint if exists tasks_status_check;
 alter table tasks add constraint tasks_status_check check (status in ('planned', 'in_progress', 'partial', 'done', 'not_done'));
+alter table tasks add column if not exists completed_at timestamptz;
+
+-- Stamps completed_at whenever a task's status changes, from WhatsApp or the dashboard:
+-- the time it became done or partly done, and empty again if it is set back to another status.
+create or replace function tasks_stamp_completed() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'INSERT' or new.status is distinct from old.status then
+    new.completed_at := case when new.status in ('done', 'partial') then now() end;
+  end if;
+  return new;
+end $$;
+drop trigger if exists tasks_stamp_completed on tasks;
+create trigger tasks_stamp_completed before insert or update of status on tasks
+  for each row execute function tasks_stamp_completed();
