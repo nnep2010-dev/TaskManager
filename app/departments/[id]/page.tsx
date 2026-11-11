@@ -14,7 +14,7 @@ export default async function DepartmentPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; saved?: string }>;
 }) {
   const user = await requireUser();
   const id = Number((await params).id);
@@ -98,10 +98,11 @@ export default async function DepartmentPage({
       {isService && (
         <>
           <h2>Service calls (pending and closed in the last 7 days)</h2>
+          {sp.saved?.startsWith("call-") && <p style={{ color: "var(--good)" }}>Call #{sp.saved.slice(5)} saved.</p>}
           {calls.length ? (
             <div className="table-wrap">
               <table className="list">
-                <thead><tr><th>#</th><th>Customer</th><th>Complaint</th><th>Engineer</th><th>Status</th><th>Notes</th></tr></thead>
+                <thead><tr><th>#</th><th>Customer</th><th>Complaint</th><th>Engineer</th><th>Status</th><th>Notes</th><th></th></tr></thead>
                 <tbody>
                   {calls.map((c) => (
                     <tr key={c.id}>
@@ -112,6 +113,7 @@ export default async function DepartmentPage({
                         {c.source === "phone" && <div className="cell-sub">📱 auto-logged{c.call_count > 1 ? ` · called ${c.call_count} times` : ""}</div>}
                       </td><td>{c.complaint}</td><td>{c.engineer}</td>
                       <td><StatusPill status={c.status} /></td><td>{c.notes}</td>
+                      <td><Link className="edit-link" href={`/calls/${c.id}`}>Edit</Link></td>
                     </tr>
                   ))}
                 </tbody>
