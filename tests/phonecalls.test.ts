@@ -82,3 +82,23 @@ test("new calls go to the Service Manager when there is one", async () => {
     await query("delete from employees where id = $1", [m!.id]);
   }
 });
+
+test("dashboard edits: close stamps the time, reopen clears it, engineer stays in the department", async () => {
+  const { saveCall, callDetail } = await import("../lib/calls");
+  const r = await logPhoneCall({ number: "9444400000" });
+  const id = (r as { id: number }).id;
+  const call = (await callDetail(id))!;
+  const sales = (await one<{ id: number }>("select id from employees where phone = '919943991034'"))!.id;
+  await saveCall(id, call.department_id!, { customer: "Ravi Textiles", complaint: "Pump noise", engineerId: sales, status: "closed", notes: "Bearing changed" });
+  let c = (await callDetail(id))!;
+  assert.equal(c.customer, "Ravi Textiles");
+  assert.equal(c.status, "closed");
+  assert.ok(c.closed_at);
+  assert.equal(c.engineer_id, call.engineer_id); // a Sales person can't be put on a Service call
+  const eng = (await one<{ id: number }>("select id from employees where phone = $1", [SERVICE_ENG]))!.id;
+  await saveCall(id, call.department_id!, { customer: "Ravi Textiles", complaint: null, engineerId: eng, status: "pending", notes: null });
+  c = (await callDetail(id))!;
+  assert.equal(c.status, "pending");
+  assert.equal(c.closed_at, null);
+  assert.equal(c.engineer_id, eng);
+});
