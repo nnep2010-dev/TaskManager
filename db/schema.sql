@@ -67,8 +67,17 @@ create table if not exists service_calls (
   status text not null default 'pending' check (status in ('pending', 'closed')),
   opened_at timestamptz not null default now(),
   closed_at timestamptz,
-  notes text
+  notes text,
+  caller_phone text,                 -- customer's number when the call came from the service phone
+  source text not null default 'whatsapp' check (source in ('whatsapp', 'phone')),
+  call_count int not null default 1, -- how many times this number rang while the call was pending
+  last_call_at timestamptz
 );
+alter table service_calls add column if not exists caller_phone text;
+alter table service_calls add column if not exists source text not null default 'whatsapp';
+alter table service_calls add column if not exists call_count int not null default 1;
+alter table service_calls add column if not exists last_call_at timestamptz;
+create index if not exists service_calls_caller_idx on service_calls (caller_phone) where status = 'pending';
 
 -- Every WhatsApp message in and out, so nothing is lost if the bot misreads something.
 create table if not exists messages (
