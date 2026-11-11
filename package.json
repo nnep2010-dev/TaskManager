@@ -7,7 +7,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "db:setup": "tsx --env-file-if-exists=.env.local scripts/setup-db.ts",
-    "test": "tsx --env-file-if-exists=.env.local --test tests/*.test.ts"
+    "test": "tsx --env-file-if-exists=.env.local --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
