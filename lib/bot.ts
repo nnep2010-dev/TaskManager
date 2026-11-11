@@ -64,6 +64,7 @@ const HELP = [
   "Service calls:",
   "• *new call* Customer name - complaint  – log a call",
   "• *close 12* notes  – close call 12",
+  "• *call #12* Customer name - complaint  – fill in details of call 12",
   "• *calls*  – your pending calls",
 ].join("\n");
 
@@ -598,16 +599,32 @@ async function handleServiceCommand(employee: Employee, text: string): Promise<b
     return true;
   }
 
+  // Fill in the customer and complaint of a call, e.g. one auto-logged from the service phone.
+  const details = text.match(/^call\s+#(\d+)[\s:-]+(.+?)(?:\s+[-–:]\s+([\s\S]+))?$/i);
+  if (details) {
+    const row = await one<{ id: number; customer: string }>(
+      `update service_calls set customer = $2, complaint = coalesce($3, complaint)
+        where id = $1 and status = 'pending' returning id, customer`,
+      [Number(details[1]), details[2].trim().slice(0, 200), details[3]?.trim().slice(0, 1000) ?? null],
+    );
+    await sendText(
+      employee.phone,
+      employee.id,
+      row ? `📝 Call #${row.id} updated: ${row.customer}${details[3] ? ` – ${details[3].trim()}` : ""}.` : `Call #${details[1]} isn't open.`,
+    );
+    return true;
+  }
+
   if (/^(calls|my calls|pending calls)$/i.test(text.trim())) {
-    const calls = await query<{ id: number; customer: string; complaint: string | null }>(
-      "select id, customer, complaint from service_calls where engineer_id = $1 and status = 'pending' order by opened_at",
+    const calls = await query<{ id: number; customer: string; complaint: string | null; caller_phone: string | null; call_count: number }>(
+      "select id, customer, complaint, caller_phone, call_count from service_calls where engineer_id = $1 and status = 'pending' order by opened_at",
       [employee.id],
     );
     await sendText(
       employee.phone,
       employee.id,
       calls.length
-        ? `*Your pending calls*\n${calls.map((c) => `#${c.id} ${c.customer}${c.complaint ? ` – ${c.complaint}` : ""}`).join("\n")}`
+        ? `*Your pending calls*\n${calls.map((c) => `#${c.id} ${c.customer}${c.caller_phone && !c.customer.includes(c.caller_phone) ? ` (+${c.caller_phone})` : ""}${c.complaint ? ` – ${c.complaint}` : ""}${c.call_count > 1 ? ` (called ${c.call_count}×)` : ""}`).join("\n")}`
         : "You have no pending calls.",
     );
     return true;

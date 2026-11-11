@@ -90,11 +90,14 @@ export type CallRow = {
   opened_at: Date;
   closed_at: Date | null;
   notes: string | null;
+  caller_phone: string | null;
+  source: "whatsapp" | "phone";
+  call_count: number;
 };
 
 export async function recentCalls(departmentId: number) {
   return query<CallRow>(
-    `select c.id, c.customer, c.complaint, e.name as engineer, c.status, c.opened_at, c.closed_at, c.notes
+    `select c.id, c.customer, c.complaint, e.name as engineer, c.status, c.opened_at, c.closed_at, c.notes, c.caller_phone, c.source, c.call_count
        from service_calls c join employees e on e.id = c.engineer_id
       where e.department_id = $1 and (c.status = 'pending' or c.closed_at > now() - interval '7 days')
       order by c.status desc, c.opened_at desc
