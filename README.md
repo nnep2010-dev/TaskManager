@@ -33,7 +33,19 @@ Staff send their daily tasks to a company WhatsApp number. A bot saves them to a
 | `new call Customer - complaint` | Logs a service call and returns its number |
 | `close 12 replaced valve` | Closes call 12 with a note |
 | `calls` | Lists your pending calls |
+| `call #12 ABC Ltd - motor not starting` | Fills in the customer and complaint of call 12 (handy for calls auto-logged from the service phone) |
 | `help` | Shows all commands |
+
+## Auto-logging calls from the service phone
+
+MacroDroid on the Android service phone sends every call to `POST /api/calls?key=<CALL_LOG_KEY>` with
+`number`, `name` (contact name, optional) and `type` (`incoming` or `missed`), as query parameters, a form body or JSON.
+
+- Each new customer number becomes a pending service call, source "auto-logged", assigned to `CALL_LOG_ASSIGN_TO`
+  (a staff WhatsApp number) or else the Service Manager, or else the Service head.
+- If the number already has a pending call, no new call is made; the call's counter goes up ("called 3 times").
+  After that call is closed, the next call from the number opens a new one.
+- Staff numbers are ignored. Missed calls get the complaint "Missed call – call back".
 
 ## Running it on your computer (test mode)
 
