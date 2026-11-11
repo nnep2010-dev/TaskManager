@@ -105,7 +105,12 @@ export default async function DepartmentPage({
                 <tbody>
                   {calls.map((c) => (
                     <tr key={c.id}>
-                      <td>{c.id}</td><td>{c.customer}</td><td>{c.complaint}</td><td>{c.engineer}</td>
+                      <td>{c.id}</td>
+                      <td>
+                        {c.customer}
+                        {c.caller_phone && !c.customer.includes(c.caller_phone) && <div className="cell-sub">+{c.caller_phone}</div>}
+                        {c.source === "phone" && <div className="cell-sub">📱 auto-logged{c.call_count > 1 ? ` · called ${c.call_count} times` : ""}</div>}
+                      </td><td>{c.complaint}</td><td>{c.engineer}</td>
                       <td><StatusPill status={c.status} /></td><td>{c.notes}</td>
                     </tr>
                   ))}
