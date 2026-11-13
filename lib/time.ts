@@ -33,3 +33,13 @@ export function addDays(d: string, n: number): string {
   t.setUTCDate(t.getUTCDate() + n);
   return t.toISOString().slice(0, 10);
 }
+
+/** "12 Nov" for a YYYY-MM-DD date. */
+export function shortDate(d: string): string {
+  return new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/** A call's daily number: "#3" for a call received on `onDate`, "12 Nov #7" for one from another day. */
+export function callLabel(callDate: string, dayNo: number, onDate?: string): string {
+  return callDate === onDate ? `#${dayNo}` : `${shortDate(callDate)} #${dayNo}`;
+}

@@ -1,5 +1,5 @@
 import { one, pool, query } from "./db";
-import { today } from "./time";
+import { formatTime, shortDate, today } from "./time";
 import { sendButtons, sendTemplate, sendText, windowOpen } from "./whatsapp";
 import * as voice from "./voice";
 
@@ -572,14 +572,14 @@ async function handleButton(employee: Employee, report: Report, buttonId: string
 async function handleServiceCommand(employee: Employee, text: string): Promise<boolean> {
   const open = text.match(/^new call[:\s]+(.+?)(?:\s+[-–:]\s+([\s\S]+))?$/i);
   if (open) {
-    const row = await one<{ id: number }>(
-      "insert into service_calls (customer, complaint, engineer_id) values ($1, $2, $3) returning id",
+    const row = await one<{ id: number; day_no: number }>(
+      "insert into service_calls (customer, complaint, engineer_id) values ($1, $2, $3) returning id, day_no",
       [open[1].trim().slice(0, 200), open[2]?.trim().slice(0, 1000) ?? null, employee.id],
     );
     await sendText(
       employee.phone,
       employee.id,
-      `📞 Call *#${row!.id}* logged for ${open[1].trim()}. Send *close ${row!.id}* with any notes when it's fixed.`,
+      `📞 Call *#${row!.id}* logged for ${open[1].trim()} (today's call no. ${row!.day_no}). Send *close ${row!.id}* with any notes when it's fixed.`,
     );
     return true;
   }
@@ -616,15 +616,17 @@ async function handleServiceCommand(employee: Employee, text: string): Promise<b
   }
 
   if (/^(calls|my calls|pending calls)$/i.test(text.trim())) {
-    const calls = await query<{ id: number; customer: string; complaint: string | null; caller_phone: string | null; call_count: number }>(
-      "select id, customer, complaint, caller_phone, call_count from service_calls where engineer_id = $1 and status = 'pending' order by opened_at",
+    const calls = await query<{ id: number; customer: string; complaint: string | null; caller_phone: string | null; call_count: number; call_date: string; day_no: number; opened_at: Date }>(
+      `select id, customer, complaint, caller_phone, call_count, call_date, day_no, opened_at
+         from service_calls where engineer_id = $1 and status = 'pending' order by call_date, day_no`,
       [employee.id],
     );
+    const day = today();
     await sendText(
       employee.phone,
       employee.id,
       calls.length
-        ? `*Your pending calls*\n${calls.map((c) => `#${c.id} ${c.customer}${c.caller_phone && !c.customer.includes(c.caller_phone) ? ` (+${c.caller_phone})` : ""}${c.complaint ? ` – ${c.complaint}` : ""}${c.call_count > 1 ? ` (called ${c.call_count}×)` : ""}`).join("\n")}`
+        ? `*Your pending calls*\n${calls.map((c) => `#${c.id} ${c.customer}${c.caller_phone && !c.customer.includes(c.caller_phone) ? ` (+${c.caller_phone})` : ""}${c.complaint ? ` – ${c.complaint}` : ""}${c.call_count > 1 ? ` (called ${c.call_count}×)` : ""}\n   _${c.call_date === day ? "Today" : shortDate(c.call_date)} call ${c.day_no}, ${formatTime(c.opened_at)}_`).join("\n")}\n\nSend *close* and the # number when a call is done.`
         : "You have no pending calls.",
     );
     return true;

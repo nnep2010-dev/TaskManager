@@ -69,20 +69,29 @@ export async function departmentDetail(departmentId: number, date: string) {
   return { dept, people };
 }
 
+const TZ = () => process.env.APP_TIME_ZONE ?? "Asia/Kolkata";
+
+/**
+ * The Service numbers for one day: calls received that day (numbered from 1), calls carried over
+ * from earlier days (still pending when the day began), calls closed that day, and calls still
+ * pending at the end of the day (now, for today).
+ */
 export async function serviceStats(departmentId: number, date: string) {
-  return one<{ total: number; pending: number; today: number; closed_today: number }>(
-    `select count(*)::int as total,
-            count(*) filter (where c.status = 'pending')::int as pending,
-            count(*) filter (where (c.opened_at at time zone $2)::date = $3::date)::int as today,
-            count(*) filter (where (c.closed_at at time zone $2)::date = $3::date)::int as closed_today
+  return one<{ received: number; carried: number; closed: number; pending: number }>(
+    `select count(*) filter (where c.call_date = $3::date)::int as received,
+            count(*) filter (where c.call_date < $3::date and (c.closed_at is null or (c.closed_at at time zone $2)::date >= $3::date))::int as carried,
+            count(*) filter (where (c.closed_at at time zone $2)::date = $3::date)::int as closed,
+            count(*) filter (where c.call_date <= $3::date and (c.closed_at is null or (c.closed_at at time zone $2)::date > $3::date))::int as pending
        from service_calls c join employees e on e.id = c.engineer_id
-      where e.department_id = $1`,
-    [departmentId, process.env.APP_TIME_ZONE ?? "Asia/Kolkata", date],
+      where e.department_id = $1 and c.status in ('pending', 'closed')`,
+    [departmentId, TZ(), date],
   );
 }
 
 export type CallRow = {
   id: number;
+  call_date: string;
+  day_no: number;
   customer: string;
   complaint: string | null;
   engineer: string;
@@ -95,14 +104,60 @@ export type CallRow = {
   call_count: number;
 };
 
-export async function recentCalls(departmentId: number) {
-  return query<CallRow>(
-    `select c.id, c.customer, c.complaint, e.name as engineer, c.status, c.opened_at, c.closed_at, c.notes, c.caller_phone, c.source, c.call_count
+const CALL_COLUMNS = `c.id, c.call_date, c.day_no, c.customer, c.complaint, e.name as engineer, c.status, c.opened_at, c.closed_at,
+            c.notes, c.caller_phone, c.source, c.call_count`;
+
+/**
+ * The calls for one day: those received that day in order (#1, #2, …), and those carried over from
+ * earlier days: still pending, or pending when the day began and closed during it.
+ */
+export async function callsForDay(departmentId: number, date: string) {
+  const rows = await query<CallRow & { carried: boolean }>(
+    `select ${CALL_COLUMNS}, c.call_date < $2::date as carried
        from service_calls c join employees e on e.id = c.engineer_id
-      where e.department_id = $1 and (c.status = 'pending' or c.closed_at > now() - interval '7 days')
-      order by c.status desc, c.opened_at desc
-      limit 50`,
-    [departmentId],
+      where e.department_id = $1
+        and (c.call_date = $2::date
+             or (c.call_date < $2::date and (c.closed_at is null or (c.closed_at at time zone $3)::date >= $2::date)))
+      order by c.call_date, c.day_no`,
+    [departmentId, date, TZ()],
+  );
+  return { received: rows.filter((r) => !r.carried), carried: rows.filter((r) => r.carried) };
+}
+
+/** How many calls were received in each IST hour, over the `days` days up to and including `date`. */
+export async function callsByHour(departmentId: number, date: string, days = 30) {
+  const rows = await query<{ hour: number; calls: number; on_day: number }>(
+    `select extract(hour from c.opened_at at time zone $3)::int as hour, count(*)::int as calls,
+            count(*) filter (where c.call_date = $2::date)::int as on_day
+       from service_calls c join employees e on e.id = c.engineer_id
+      where e.department_id = $1 and c.call_date > $2::date - $4::int and c.call_date <= $2::date
+      group by 1 order by 1`,
+    [departmentId, date, TZ(), days],
+  );
+  return hourBuckets(rows);
+}
+
+/** Fills in the empty hours, from 9 am to 6 pm at least and wider if calls came in earlier or later. */
+export function hourBuckets(rows: { hour: number; calls: number; on_day: number }[]) {
+  const from = Math.min(9, ...rows.map((r) => r.hour));
+  const to = Math.max(18, ...rows.map((r) => r.hour));
+  const byHour = new Map(rows.map((r) => [r.hour, r]));
+  return Array.from({ length: to - from + 1 }, (_, i) => {
+    const hour = from + i;
+    return { hour, calls: byHour.get(hour)?.calls ?? 0, on_day: byHour.get(hour)?.on_day ?? 0 };
+  });
+}
+
+/** Calls for the CSV: the day's calls and the ones carried over into it. */
+export async function callExportRows(departmentId: number | null, date: string) {
+  return query<CallRow & { carried: boolean; department: string }>(
+    `select ${CALL_COLUMNS}, c.call_date < $2::date as carried, d.name as department
+       from service_calls c join employees e on e.id = c.engineer_id join departments d on d.id = e.department_id
+      where ($1::int is null or e.department_id = $1)
+        and (c.call_date = $2::date
+             or (c.call_date < $2::date and (c.closed_at is null or (c.closed_at at time zone $3)::date >= $2::date)))
+      order by d.sort_order, c.call_date < $2::date desc, c.call_date, c.day_no`,
+    [departmentId, date, TZ()],
   );
 }
 

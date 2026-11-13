@@ -4,6 +4,8 @@ export type CallStatus = "pending" | "closed";
 
 export type CallDetail = {
   id: number;
+  call_date: string;
+  day_no: number;
   customer: string;
   complaint: string | null;
   engineer_id: number | null;
@@ -19,7 +21,7 @@ export type CallDetail = {
 
 export async function callDetail(id: number) {
   return one<CallDetail>(
-    `select c.id, c.customer, c.complaint, c.engineer_id, e.department_id, c.status, c.notes,
+    `select c.id, c.call_date, c.day_no, c.customer, c.complaint, c.engineer_id, e.department_id, c.status, c.notes,
             c.caller_phone, c.source, c.call_count, c.opened_at, c.closed_at
        from service_calls c left join employees e on e.id = c.engineer_id
       where c.id = $1`,
