@@ -46,6 +46,17 @@ MacroDroid on the Android service phone sends every call to `POST /api/calls?key
 - If the number already has a pending call, no new call is made; the call's counter goes up ("called 3 times").
   After that call is closed, the next call from the number opens a new one.
 - Staff numbers are ignored. Missed calls get the complaint "Missed call – call back".
+- On the Service page, each call has an **Edit** link (proprietors and the Service head) to change the customer, complaint, engineer, status and notes.
+
+## Daily call numbers
+
+- Every service call gets a number for the day it came in (IST): #1, #2, … starting again from 1 each day. A database
+  trigger sets `call_date` and `day_no`; the call's `id` stays as its permanent reference ("Ref"), and WhatsApp
+  commands (*close 12*, *call #12 …*) keep using that reference.
+- The Service page, for the chosen date, shows: new calls that day, calls carried over (pending when the day began,
+  shown with their own date and number such as "12 Nov #7"), calls closed that day, and calls pending at the end of the day.
+- Each call shows the time it was received. **Calls by hour** shows the last 30 days of calls by the hour they came in.
+- **Export calls CSV** on the Service page downloads the day's calls and the carried over ones, with received time and hour.
 
 ## Running it on your computer (test mode)
 
