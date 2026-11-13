@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { canSeeDepartment, currentUser, requireUser } from "@/lib/auth";
 import { callDetail, departmentStaff, saveCall, type CallStatus } from "@/lib/calls";
-import { formatStamp, today } from "@/lib/time";
+import { callLabel, formatStamp, today } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -54,9 +54,9 @@ export default async function EditCallPage({
         {user.access === "proprietor" && <><Link href="/">All departments</Link> / </>}
         <Link href={back}>Service</Link> /
       </div>
-      <h1>Call #{call.id}</h1>
+      <h1>Call {callLabel(call.call_date, call.day_no)}</h1>
       <p className="sub">
-        Logged {formatStamp(call.opened_at, today())}
+        Ref {call.id} · received {formatStamp(call.opened_at, today())}
         {call.source === "phone" && ` · 📱 auto-logged from the service phone${call.call_count > 1 ? `, called ${call.call_count} times` : ""}`}
         {call.caller_phone && ` · +${call.caller_phone}`}
         {call.closed_at && ` · closed ${formatStamp(call.closed_at, today())}`}
