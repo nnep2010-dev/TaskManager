@@ -71,7 +71,9 @@ create table if not exists service_calls (
   caller_phone text,                 -- customer's number when the call came from the service phone
   source text not null default 'whatsapp' check (source in ('whatsapp', 'phone')),
   call_count int not null default 1, -- how many times this number rang while the call was pending
-  last_call_at timestamptz
+  last_call_at timestamptz,
+  call_date date,                    -- IST date the call was received (set by the trigger below)
+  day_no int                         -- its number on that day: 1, 2, 3… starting again each day
 );
 alter table service_calls add column if not exists caller_phone text;
 alter table service_calls add column if not exists source text not null default 'whatsapp';
@@ -114,3 +116,25 @@ end $$;
 drop trigger if exists tasks_stamp_completed on tasks;
 create trigger tasks_stamp_completed before insert or update of status on tasks
   for each row execute function tasks_stamp_completed();
+
+-- Daily call numbers: every service call gets the IST date it was received (call_date) and its number
+-- on that day (day_no), starting again from 1 each day. The id stays as the permanent call reference.
+alter table service_calls add column if not exists call_date date;
+alter table service_calls add column if not exists day_no int;
+update service_calls c set call_date = x.d, day_no = x.n
+  from (select id, (opened_at at time zone 'Asia/Kolkata')::date as d,
+               row_number() over (partition by (opened_at at time zone 'Asia/Kolkata')::date order by opened_at, id) as n
+          from service_calls) x
+ where x.id = c.id and c.day_no is null;
+create or replace function service_calls_number() returns trigger language plpgsql as $$
+begin
+  new.call_date := (coalesce(new.opened_at, now()) at time zone 'Asia/Kolkata')::date;
+  -- one numbering at a time per day, so two calls arriving together never get the same number
+  perform pg_advisory_xact_lock(784512, new.call_date - date '2000-01-01');
+  select coalesce(max(day_no), 0) + 1 into new.day_no from service_calls where call_date = new.call_date;
+  return new;
+end $$;
+drop trigger if exists service_calls_number on service_calls;
+create trigger service_calls_number before insert on service_calls
+  for each row execute function service_calls_number();
+create unique index if not exists service_calls_day_no_idx on service_calls (call_date, day_no);
